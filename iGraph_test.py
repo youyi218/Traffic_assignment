@@ -26,7 +26,7 @@ import os
 if os.name == "nt":
     inputLocation = os.path.dirname(os.path.realpath(__file__)) + "\\ATMO\\"
 else:
-    inputLocation = os.path.dirname(os.path.realpath(__file__)) + "//ATMO//"
+    inputLocation = os.path.dirname(os.path.realpath(__file__)) + "/ATMO/"
 #print(inputLocation)
 
 indexA = 0
