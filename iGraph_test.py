@@ -14,13 +14,20 @@ Created on Sun May 28 21:09:46 2017
 import math
 import time
 import numpy as np
-from scipy import optimize
 import os
 import csv
+from scipy.optimize import fsolve
 from igraph import *
+from multiprocessing import Pool
+from collections import Counter
+import psutil
+import os
 
-inputLocation = os.path.dirname(os.path.realpath(__file__)) + "\\ATMO\\"
-print(inputLocation)
+if os.name == "nt":
+    inputLocation = os.path.dirname(os.path.realpath(__file__)) + "\\ATMO\\"
+else:
+    inputLocation = os.path.dirname(os.path.realpath(__file__)) + "//ATMO//"
+#print(inputLocation)
 
 indexA = 0
 indexB = 0
@@ -32,6 +39,7 @@ indexPeage = 0
 HORIZON = 2017
 TCAM1530 = 1.32
 TCAM3050 = -0.86
+n_processor= psutil.cpu_count(logical = False)
 class Zone:
     def __init__(self, _tmpIn):
         self.zoneId = _tmpIn[0]
@@ -57,7 +65,7 @@ def readDemand():
     for x in inFile:
         tmpIn = [t.strip() for t in x.strip().split(",")]
         A, B = int(float(tmpIn[0])), int(float(tmpIn[1]))
-        if A > 2000:
+        if A > 200:
             break
         tripSet[A, B] = initDemand(tmpIn)
         if A not in zoneSet:
@@ -73,17 +81,17 @@ def readDemand():
 
 
 def readNetwork(g):
-    # print("Lire les noeuds")
-    # with open(inputLocation + "nodes.csv" ) as inFile:
-    #     fileReader = csv.reader(inFile, delimiter = ';')
-    #     attributs = next(fileReader)
-    #     indexId = attributs.index('N')
-    #     listNodeId = []
-    #     for tmpIn in fileReader:
-    #         listNodeId.append(int(tmpIn[indexId]))
-    #     g.add_vertices(len(listNodeId)) 
-    #     g.vs['id'] = listNodeId
-    g.add_vertices(800000)
+    print("Lire les noeuds")
+    with open(inputLocation + "nodes.csv" ) as inFile:
+        fileReader = csv.reader(inFile, delimiter = ';')
+        attributs = next(fileReader)
+        indexId = attributs.index('N')
+        listNodeId = []
+        for tmpIn in fileReader:
+            listNodeId.append(str(tmpIn[indexId]))
+        g.add_vertices(listNodeId) 
+        # g.vs['id'] = listNodeId
+    # g.add_vertices(800000)
         
     print("Lire les arcs")
     with open(inputLocation + "network.csv" ) as inFile:
@@ -103,9 +111,7 @@ def readNetwork(g):
         # initialize all edges:
         list_arcs = []
         for tmpIn in fileReader:
-            A, B = int(tmpIn[indexA]), int(tmpIn[indexB])
-            # list_arcs.append((g.vs.find(id=A),g.vs.find(id=B)))
-            list_arcs.append((A,B))
+            list_arcs.append((str(tmpIn[indexA]), str(tmpIn[indexB])))
         g.add_edges(list_arcs)
         inFile.close()
         
@@ -117,15 +123,14 @@ def readNetwork(g):
             if counter % 50000 == 0:
                 print(counter)
             counter += 1
-            A, B = int(tmpIn[indexA]), int(tmpIn[indexB])
-            # g.add_edges([(A, B)])
+            A, B = str(tmpIn[indexA]), str(tmpIn[indexB])
             edge_id = g.get_eid(A,B)
-            # calculate cost
             linktype = int(float(tmpIn[indexLinktype]))
             distance = round(float(tmpIn[indexDistance]),2)
             speed = int(float(tmpIn[indexSpeed]))
             peage = float(tmpIn[indexPeage])
             ftt = 60 * distance / speed
+            # calculate cost
             if linktype == 100:
                 cost_hp = 0.21 * max(distance - 0.3, 0) * math.pow(1 + TCAM1530/100, min(HORIZON, 2030)-2017) *\
                     math.pow(1 + TCAM3050/100, max(HORIZON, 2030) - 2030)
@@ -161,41 +166,9 @@ def readNetwork(g):
         inFile.close()
 
 ###########################################################################################################################
-#%%
-readStart = time.time()
-g = Graph(directed = True)
 
-tripSet = {}
-zoneSet = {}
 
-print("reading")
-readDemand()
-readNetwork(g)
-
-originZones = set([k['fromZone'] for k in tripSet.values()])
-print("Reading the network data took", round(time.time() - readStart, 2), "secs")
-
-#%%
-def DijkstraHeap(origin):
-    '''
-    Calcualtes shortest path from an origin to all other destinations.
-    The labels and preds are stored in node instances.
-    '''
-    # time1 = time.time()
-    # labels = g.shortest_paths([origin], zoneSet[origin].destList, "cost", "out")
-    # print("Time 1: ", round(time.time() - time1, 2), "secs")
-    # print(labels[0][:20])
-    # time2 = time.time()
-    paths = g.get_shortest_paths(origin, zoneSet[origin].destList, "cost", "out", "epath")
-    # print(paths[:20])
-    # print("Time 2: ", round(time.time() - time2, 2), "secs")
-    
-    # time3 = time.time()
-    # somme = [int(sum(g.es[c]['cost'])) for c in paths]
-    # print(somme[:20])
-    # print("Time 3: ", round(time.time() - time3, 2), "secs")
-    return paths
-        
+#%%        
 def updateTravelTime():
     '''
     This method updates the travel time ['t'] on the links with the current flow
@@ -295,77 +268,80 @@ def updateTravelTime():
         edge['t'] = edge['t'] * (1 + gamma_v * math.pow(((e+1)*edge['flow']/24*chi_v/edge['capacity']),alpha_v))
         edge['cost'] = edge['t'] + edge['p']
 
-from scipy.optimize import fsolve
+
 def findAlpha(x_bar):
     '''
     This uses unconstrained optimization to calculate the optimal step size required
     for Frank-Wolfe Algorithm
-
-    ******************* Need to be revised: Currently not working.**********************************************
     '''
-    #alpha = 0.0
-
     print("calculate alpha for FW algo")
     def df(alpha):
         sum_derivative = 0 ## this line is the derivative of the objective function.
-        for edge in g.es:
-            key = g.get_eid(edge.source, edge.target)
-            sum_derivative = sum_derivative + (x_bar[key] - edge['flow'])*edge['cost']
+        for i in range(len(g.es)):
+            sum_derivative = sum_derivative + (x_bar[i] - g.es[i]['flow'])*g.es[i]['cost']
         return sum_derivative
-    # sol = optimize.root(df, np.array([0.1]))
     sol2 = fsolve(df, np.array([0.1]))
-    #print(sol.x[0], sol2[0])
     return max(0.1, min(1, sol2[0]))
-    '''
-    def int(alpha):
-        tmpSum = 0
-        for l in linkSet:
-            tmpFlow = (linkSet[l].flow + alpha*(x_bar[l] - linkSet[l].flow))
-            tmpSum = tmpSum + linkSet[l].fft*(tmpFlow + linkSet[l].alpha * (math.pow(tmpFlow, 5) / math.pow(linkSet[l].capacity, 4)))
-        return tmpSum
 
-    bounds = ((0, 1),)
-    init = np.array([0.7])
-    sol = optimize.minimize(int, x0=init, method='SLSQP', bounds = bounds)
-
-    print(sol.x, sol.success)
-    if sol.success == True:
-        return sol.x[0]#max(0, min(1, sol[0]))
-    else:
-        return 0.2
-    '''
-
-def loadAON():
+def loadAON_process(originZones_p, g_p, zoneSet_p, tripSet_p, nb_process):
     '''
     This method produces auxiliary flows for all or nothing loading.
+    
+    Returns:
+        SPTT: sum of the cost and demand of all links
+        x_bar: a dictionary of flows of all links
     '''
-    x_bar = {l: 0.0 for l in range(len(g.es))}
+    print("new process")
+    x_bar = {l: 0.0 for l in range(len(g_p.es))}
     SPTT = 0.0
-    for r in originZones:
-        print("start charge AON: " + str(r))
+    for r in originZones_p:
         timeDijkstra= time.time()
-        paths = DijkstraHeap(r)
-        for index, s in enumerate(zoneSet[r].destList):
-            tripSet[(r, s)]['sequence'] = paths[index]
+        paths = g_p.get_shortest_paths(str(r), [str(dest) for dest in zoneSet_p[r].destList], "cost", "out", "epath")
+        for index, s in enumerate(zoneSet_p[r].destList):
+            tripSet_p[(r, s)]['sequence'] = paths[index]
             try:
-                dem = tripSet[r, s]['demand']
+                dem = tripSet_p[r, s]['demand']
             except KeyError:
                 dem = 0.0
             try:
-                SPTT = SPTT + int(sum(g.es[paths[index]]['cost']) * dem)
+                SPTT = SPTT + int(sum(g_p.es[paths[index]]['cost']) * dem)
             except KeyError:
                 SPTT = 0.0
             if r != s:
-                tripSet[(r, s)]['sptt'] = str(SPTT)
-                for path in paths[index]:
-                    x_bar[path] = x_bar[path] + dem
-        print("Dijkstra time used: ", round(time.time() - timeDijkstra, 2), "secs")
+                tripSet_p[(r, s)]['sptt'] = str(SPTT)
+                for edge in paths[index]:
+                    x_bar[edge] = x_bar[edge] + dem
+        print("Process: {}, Origin: {}, Dijkstra time used: {} sedonds ".format(nb_process, r, round(time.time() - timeDijkstra, 2)))
     return SPTT, x_bar
 
-def assignment(loading, algorithm, accuracy = 0.01, maxIter=100):
+def loadAON():
+    """
+    This function start multiprocesses for calculation of shortest paths
+    """
+    print('Start all or nothing loading')
+    SPTT_list, x_bar_list = [], []
+    originZones_list = [list(originZones)[i::n_processor] for i in range(n_processor)]
+    pool = Pool(n_processor)
+    process_results = []
+    for p in range(n_processor):
+        print("Start process: ",str(p))
+        process_results.append(pool.apply_async(loadAON_process, args=(originZones_list[p], g, zoneSet, tripSet, p)))
+    pool.close()
+    pool.join()
+    results = [result.get() for result in process_results]
+    SPTT_list, x_bar_list = zip(*results)
+    SPTT = sum(SPTT_list)
+    # print(x_bar_list)
+    x_bar = Counter()
+    for i in range(n_processor):
+        x_bar += Counter(x_bar_list[i])
+    # print(x_bar)
+    print("Loading finished")
+    return SPTT, x_bar
+
+def assignment(algorithm, accuracy = 0.01, maxIter=100):
     '''
     * Performs traffic assignment
-    * Type is either deterministic or stochastic (for now only deterministic)
     * Algorithm to calculate alpha can be MSA or FW
     * Accuracy to be given for convergence
     * maxIter to stop if not converged
@@ -375,38 +351,35 @@ def assignment(loading, algorithm, accuracy = 0.01, maxIter=100):
     x_bar = {l: 0.0 for l in range(len(g.es))}
     startP = time.time()
     while gap > accuracy:
-        print("iteration start")
+        print("iteration start :" + str(it))
+        # Calculate the alpha
         if algorithm == "MSA" or it < 2:
             alpha = (1.0/it)
         elif algorithm == "FW":
             alpha = findAlpha(x_bar)
-            #print("alpha", alpha)
         else:
             print("Terminating the program.....")
             print("The solution algorithm ", algorithm, " does not exist!")
-        # prevLinkFlow = np.array([g.es['flow']])
-        timeFlow = time.time()
-        for i in range(len(g.es)):
-            g.es[i]['flow'] = alpha*x_bar[i] + (1-alpha)*g.es[i]['flow']
-        print("Modify attribut flow time used: ", round(time.time() - timeFlow, 2), "secs")
+            
         timeCost = time.time()
         updateTravelTime()
         print("Update travel time used: ", round(time.time() - timeCost, 2), "secs")
-        #printXbar(x_bar)
-        if loading == "deterministic":
-            SPTT, x_bar = loadAON()
-            #print([linkSet[a].flow * linkSet[a].cost for a in linkSet])
-            TSTT = round(sum([a['flow'] * a['cost'] for a in g.es]), 3)
-            SPTT = round(SPTT, 3)
-            gap = round(abs((TSTT / SPTT) - 1), 5)
-            # print(TSTT, SPTT, gap)
-            if it == 1:
-                gap = gap + float("inf")
-                
-        else:
-            print("Terminating the program.....")
-            print("The loading ", loading, " is unknown")
-
+        
+        # All or nothing load
+        SPTT, x_bar = loadAON()
+        
+        # Update flow for every link with old_flow and flow of current iteration
+        timeFlow = time.time()
+        for i in range(len(g.es)):
+            g.es[i]['flow'] = alpha*x_bar[i] + (1-alpha)*g.es[i]['flow']
+        print("Modify attributs flow time used: ", round(time.time() - timeFlow, 2), "secs")
+        
+        # total demand assigned
+        TSTT = round(sum([a['flow'] * a['cost'] for a in g.es]), 3)
+        # total demand in reality
+        SPTT = round(SPTT, 3)
+        gap = round(abs((TSTT / SPTT) - 1), 5)
+        # print(TSTT, SPTT, gap)
         it = it + 1
         if it > maxIter:
             print("The assignment did not converge with the desired gap and max iterations are reached")
@@ -414,14 +387,12 @@ def assignment(loading, algorithm, accuracy = 0.01, maxIter=100):
             break
     print("Assignment took", time.time() - startP, " seconds")
     print("assignment converged in ", it-1, " iterations")
+    print("current gap ", gap)
 
 
 ###########################################################################################################################
 
-#%%
 
-print("start assignement: ")
-assignment("deterministic", "MSA", accuracy = 0.1, maxIter=3)
 #%%
 
 def writeUEresults(sep=';'):
@@ -445,7 +416,29 @@ def writePathResults(sep=';'):
     outFile.close()
     
 #%%
-writeUEresults()
-#assignment("stochastic", "MSA", accuracy = 0.01, maxIter=100)"" 
-writePathResults()
+    
+#%%
+if __name__ == '__main__':
+    
+    #%%
+    readStart = time.time()
+    g = Graph(directed = True)
+    
+    tripSet = {}
+    zoneSet = {}
+    
+    print("reading")
+    readDemand()
+    readNetwork(g)
+    
+    originZones = set([k['fromZone'] for k in tripSet.values()])
+    print("Reading the network data took", round(time.time() - readStart, 2), "secs")
+    
+    print("start assignement: ")
+    assignment("MSA", accuracy = 0.1, maxIter=3)
+
+#%%
+    writeUEresults()
+    #assignment("stochastic", "MSA", accuracy = 0.01, maxIter=100)"" 
+    writePathResults()
 
