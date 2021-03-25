@@ -65,8 +65,8 @@ def readDemand():
     for x in inFile:
         tmpIn = [t.strip() for t in x.strip().split(",")]
         A, B = int(float(tmpIn[0])), int(float(tmpIn[1]))
-        if A > 200:
-            break
+        # if A > 200:
+        #     break
         tripSet[A, B] = initDemand(tmpIn)
         if A not in zoneSet:
             zoneSet[A] = Zone([A])
@@ -401,7 +401,7 @@ def writeUEresults(sep=';'):
     outFile.write(tmpOut+"\n")
     
     for edge in g.es:
-        tmpOut = str(edge.target) + sep + str(edge.source) + sep + str(edge['capacity']) + sep + str(edge['distance']) + sep + str(edge['cost']) + sep + str(edge['flow'])
+        tmpOut = str(g.es[edge.target]['name']) + sep + str(g.es[edge.source]['name']) + sep + str(edge['capacity']) + sep + str(edge['distance']) + sep + str(edge['cost']) + sep + str(edge['flow'])
         outFile.write(tmpOut + "\n")
     
     outFile.close()
