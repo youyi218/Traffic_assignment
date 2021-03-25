@@ -39,7 +39,8 @@ indexPeage = 0
 HORIZON = 2017
 TCAM1530 = 1.32
 TCAM3050 = -0.86
-n_processor= psutil.cpu_count(logical = False)
+#n_processor= psutil.cpu_count(logical = False)
+# n_processor= 2
 class Zone:
     def __init__(self, _tmpIn):
         self.zoneId = _tmpIn[0]
@@ -65,8 +66,8 @@ def readDemand():
     for x in inFile:
         tmpIn = [t.strip() for t in x.strip().split(",")]
         A, B = int(float(tmpIn[0])), int(float(tmpIn[1]))
-        if A > 200:
-            break
+        # if A > 50:
+        #     break
         tripSet[A, B] = initDemand(tmpIn)
         if A not in zoneSet:
             zoneSet[A] = Zone([A])
@@ -283,7 +284,7 @@ def findAlpha(x_bar):
     sol2 = fsolve(df, np.array([0.1]))
     return max(0.1, min(1, sol2[0]))
 
-def loadAON_process(originZones_p, g_p, zoneSet_p, tripSet_p, nb_process):
+def loadAON():
     '''
     This method produces auxiliary flows for all or nothing loading.
     
@@ -291,53 +292,52 @@ def loadAON_process(originZones_p, g_p, zoneSet_p, tripSet_p, nb_process):
         SPTT: sum of the cost and demand of all links
         x_bar: a dictionary of flows of all links
     '''
-    print("new process")
-    x_bar = {l: 0.0 for l in range(len(g_p.es))}
+    x_bar = {l: 0.0 for l in range(len(g.es))}
     SPTT = 0.0
-    for r in originZones_p:
+    for r in originZones:
         timeDijkstra= time.time()
-        paths = g_p.get_shortest_paths(str(r), [str(dest) for dest in zoneSet_p[r].destList], "cost", "out", "epath")
-        for index, s in enumerate(zoneSet_p[r].destList):
-            tripSet_p[(r, s)]['sequence'] = paths[index]
+        paths = g.get_shortest_paths(str(r), [str(dest) for dest in zoneSet[r].destList], "cost", "out", "epath")
+        for index, s in enumerate(zoneSet[r].destList):
+            # tripSet[(r, s)]['sequence'] = paths[index]
             try:
-                dem = tripSet_p[r, s]['demand']
+                dem = tripSet[r, s]['demand']
             except KeyError:
                 dem = 0.0
             try:
-                SPTT = SPTT + int(sum(g_p.es[paths[index]]['cost']) * dem)
+                SPTT = SPTT + int(sum(g.es[paths[index]]['cost']) * dem)
             except KeyError:
                 SPTT = 0.0
             if r != s:
-                tripSet_p[(r, s)]['sptt'] = str(SPTT)
+                tripSet[(r, s)]['sptt'] = str(SPTT)
                 for edge in paths[index]:
                     x_bar[edge] = x_bar[edge] + dem
-        print("Process: {}, Origin: {}, Dijkstra time used: {} sedonds ".format(nb_process, r, round(time.time() - timeDijkstra, 2)))
+        print("Origin: {}, Dijkstra time used: {} sedonds ".format(r, round(time.time() - timeDijkstra, 2)))
     return SPTT, x_bar
 
-def loadAON():
-    """
-    This function start multiprocesses for calculation of shortest paths
-    """
-    print('Start all or nothing loading')
-    SPTT_list, x_bar_list = [], []
-    originZones_list = [list(originZones)[i::n_processor] for i in range(n_processor)]
-    pool = Pool(n_processor)
-    process_results = []
-    for p in range(n_processor):
-        print("Start process: ",str(p))
-        process_results.append(pool.apply_async(loadAON_process, args=(originZones_list[p], g, zoneSet, tripSet, p)))
-    pool.close()
-    pool.join()
-    results = [result.get() for result in process_results]
-    SPTT_list, x_bar_list = zip(*results)
-    SPTT = sum(SPTT_list)
-    # print(x_bar_list)
-    x_bar = Counter()
-    for i in range(n_processor):
-        x_bar += Counter(x_bar_list[i])
-    # print(x_bar)
-    print("Loading finished")
-    return SPTT, x_bar
+# def loadAON():
+#     """
+#     This function start multiprocesses for calculation of shortest paths
+#     """
+#     print('Start all or nothing loading')
+#     SPTT_list, x_bar_list = [], []
+#     originZones_list = [list(originZones)[i::n_processor] for i in range(n_processor)]
+#     pool = Pool(n_processor)
+#     process_results = []
+#     for p in range(n_processor):
+#         print("Start process: ",str(p))
+#         process_results.append(pool.apply_async(loadAON_process, args=(originZones_list[p], g, zoneSet, tripSet, p)))
+#     pool.close()
+#     pool.join()
+#     results = [result.get() for result in process_results]
+#     SPTT_list, x_bar_list = zip(*results)
+#     SPTT = sum(SPTT_list)
+#     # print(x_bar_list)
+#     x_bar = Counter()
+#     for i in range(n_processor):
+#         x_bar += Counter(x_bar_list[i])
+#     # print(x_bar)
+#     print("Loading finished")
+#     return SPTT, x_bar
 
 def assignment(algorithm, accuracy = 0.01, maxIter=100):
     '''
@@ -401,7 +401,7 @@ def writeUEresults(sep=';'):
     outFile.write(tmpOut+"\n")
     
     for edge in g.es:
-        tmpOut = str(edge.target) + sep + str(edge.source) + sep + str(edge['capacity']) + sep + str(edge['distance']) + sep + str(edge['cost']) + sep + str(edge['flow'])
+        tmpOut = str(g.vs[edge.target]['name']) + sep + str(g.vs[edge.source]['name']) + sep + str(edge['capacity']) + sep + str(edge['distance']) + sep + str(edge['cost']) + sep + str(edge['flow'])
         outFile.write(tmpOut + "\n")
     
     outFile.close()
@@ -440,5 +440,5 @@ if __name__ == '__main__':
 #%%
     writeUEresults()
     #assignment("stochastic", "MSA", accuracy = 0.01, maxIter=100)"" 
-    writePathResults()
+    # writePathResults()
 
