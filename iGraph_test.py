@@ -66,7 +66,7 @@ def readDemand():
     for x in inFile:
         tmpIn = [t.strip() for t in x.strip().split(",")]
         A, B = int(float(tmpIn[0])), int(float(tmpIn[1]))
-        # if A > 300:
+        # if A > 50:
         #     break
         tripSet[A, B] = initDemand(tmpIn)
         if A not in zoneSet:
@@ -243,7 +243,6 @@ def updateTravelTime():
                     gamma_v = 2.7
         else:
             if edge['nature'] == 'Route a 2 chaussees':
-                e = 3
                 chi_v = 2
                 gamma_v = 0.41
                 if edge['nb_voies'] in [1,2]:
@@ -288,7 +287,7 @@ def loadAON():
     SPTT = 0.0
     for r in originZones:
         timeDijkstra= time.time()
-        paths = g.get_shortest_paths(str(r), [str(dest) for dest in zoneSet[r].destList], "cost", "out", "epath")
+        paths = g.get_shortest_paths(str(r), [str(dest) for dest in zoneSet[r].destList], "cost_total", "out", "epath")
         for index, s in enumerate(zoneSet[r].destList):
             # tripSet[(r, s)]['sequence'] = paths[index]
             try:
@@ -345,7 +344,7 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
     startP = time.time()
     while gap > accuracy:
         startI  = time.time()
-        print("iteration start :" + str(it))
+        print("iteration {} start.".format(it))
         # Calculate the alpha
         if algorithm == "MSA" or it < 2:
             alpha = (1.0/it)
@@ -373,12 +372,11 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
         # total demand in reality
         SPTT = round(SPTT, 3)
         gap = round(abs((TSTT / SPTT) - 1), 5)
-        print("Iteeration {} takes {} seconds, gap is {} with alpha {}.".format(it, round(time.time() - startI, 2) gap, alpha))
-        print(TSTT, SPTT, gap)
+        print("Iteration {} takes {} seconds, gap is {} with alpha {}.".format(it, round(time.time() - startI, 2), gap, alpha))
+        print("TSTT: {}, SPTT: {}, gap: {}".format(TSTT, SPTT, gap))
         it = it + 1
         if it > maxIter:
             print("The assignment did not converge with the desired gap and max iterations are reached")
-            print("current gap ", gap)
             break
     print("Assignment took", round(time.time() - startP, 2), " seconds")
     print("assignment converged in ", it-1, " iterations")
@@ -391,7 +389,7 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
 #%%
 
 def writeUEresults(sep=';'):
-    outFile = open("UE_results2.csv", "w")                                                                                                                                                                                                                                                                # IVT, WT, WK, TR
+    outFile = open("UE_results3.csv", "w")                                                                                                                                                                                                                                                                # IVT, WT, WK, TR
     tmpOut = sep.join(["B","A","Capacite","Distance","Cout","Volume"])
     outFile.write(tmpOut+"\n")
     
