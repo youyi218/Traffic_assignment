@@ -66,8 +66,8 @@ def readDemand():
     for x in inFile:
         tmpIn = [t.strip() for t in x.strip().split(",")]
         A, B = int(float(tmpIn[0])), int(float(tmpIn[1]))
-        # if A > 50:
-        #     break
+        if A > 300:
+           break
         tripSet[A, B] = initDemand(tmpIn)
         if A not in zoneSet:
             zoneSet[A] = Zone([A])
@@ -261,7 +261,7 @@ def updateTravelTime():
         edge['cost_total'] = edge['cost_t'] + 4 * edge['cost_p']
 
 
-def findAlpha(x_bar):
+def findAlpha(x, y):
     '''
     This uses unconstrained optimization to calculate the optimal step size required
     for Frank-Wolfe Algorithm
@@ -270,7 +270,7 @@ def findAlpha(x_bar):
     def df(alpha):
         sum_derivative = 0 ## this line is the derivative of the objective function.
         for i in range(len(g.es)):
-            sum_derivative = sum_derivative + (x_bar[i] - g.es[i]['flow'])*g.es[i]['cost_total']
+            sum_derivative = sum_derivative + (x[i] + alpha * (y[i] - x[i]))
         return sum_derivative
     sol2 = fsolve(df, np.array([0.1]))
     return max(0.1, min(1, sol2[0]))
@@ -283,7 +283,7 @@ def loadAON():
         SPTT: sum of the cost and demand of all links
         x_bar: a dictionary of flows of all links
     '''
-    x_bar = {l: 0.0 for l in range(len(g.es))}
+    x_bar = [0.0] * len(g.es)
     SPTT = 0.0
     for r in originZones:
         timeDijkstra= time.time()
@@ -302,7 +302,7 @@ def loadAON():
                 tripSet[(r, s)]['sptt'] = str(SPTT)
                 for edge in paths[index]:
                     x_bar[edge] = x_bar[edge] + dem
-        if int(r)%500 == 0:
+        if int(r)%100 == 0:
             print("Origin: {}, Dijkstra time used: {} sedonds ".format(r, round(time.time() - timeDijkstra, 2)))
     return SPTT, x_bar
 
@@ -340,41 +340,48 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
     '''
     it = 1 # iteration
     gap = float("inf")
-    x_bar = {l: 0.0 for l in range(len(g.es))}
     startP = time.time()
+    print("Initialisation starts")
+    _, g.es['flow'] = loadAON() # 0. Initialisation with AON load
+    total_cost1 = round(sum([a['flow'] * a['cost_total'] for a in g.es]), 3)
     while gap > accuracy:
         startI  = time.time()
         print("iteration {} start.".format(it))
-        # Calculate the alpha
+        
+        timeCost = time.time()
+        updateTravelTime() # 1. Update time cost
+        print("Update travel time used: ", round(time.time() - timeCost, 2), "secs")
+
+        # All or nothing load
+        _, y_bar = loadAON() # 2. Direction finding
+        
+        # 3. Calculate the alpha
         if algorithm == "MSA" or it < 2:
             alpha = (1.0/it)
         elif algorithm == "FW":
-            alpha = findAlpha(x_bar)
+            alpha = findAlpha(g.es['flow'], y_bar)
         else:
             print("Terminating the program.....")
             print("The solution algorithm ", algorithm, " does not exist!")
         
-        timeCost = time.time()
-        updateTravelTime()
-        print("Update travel time used: ", round(time.time() - timeCost, 2), "secs")
-
-        # All or nothing load
-        SPTT, x_bar = loadAON()
-        
-        # Update flow for every link with old_flow and flow of current iteration
+        # 4. Move flows
         timeFlow = time.time()
         for i in range(len(g.es)):
-            g.es[i]['flow'] = alpha*x_bar[i] + (1-alpha)*g.es[i]['flow']
+            g.es[i]['flow'] = alpha*y_bar[i] + (1-alpha)*g.es[i]['flow']
         print("Modify attributs flow time used: ", round(time.time() - timeFlow, 2), "secs")
         
         # total demand assigned
-        TSTT = round(sum([a['flow'] * a['cost_total'] for a in g.es]), 3)
+        # TSTT = round(sum([a['flow'] * a['cost_total'] for a in g.es]), 3)
         # total demand in reality
-        SPTT = round(SPTT, 3)
-        gap = round(abs((TSTT / SPTT) - 1), 5)
+        # SPTT = round(SPTT, 3)
+        # gap = round(abs((TSTT / SPTT) - 1), 5)
+        total_cost2 = round(sum([a['flow'] * a['cost_total'] for a in g.es]), 3)
+        gap = abs(total_cost1 - total_cost2) / total_cost1
         print("Iteration {} takes {} seconds, gap is {} with alpha {}.".format(it, round(time.time() - startI, 2), gap, alpha))
-        print("TSTT: {}, SPTT: {}, gap: {}".format(TSTT, SPTT, gap))
+        print("TSTT: {}, SPTT: {}, gap: {}".format(total_cost1, total_cost2, gap))
         it = it + 1
+        total_cost1 = total_cost2
+        writeUEresults(it)
         if it > maxIter:
             print("The assignment did not converge with the desired gap and max iterations are reached")
             break
@@ -388,8 +395,12 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
 
 #%%
 
-def writeUEresults(sep=';'):
-    outFile = open("UE_results3.csv", "w")                                                                                                                                                                                                                                                                # IVT, WT, WK, TR
+def writeUEresults(iteration = 0, sep=';'):
+    if iteration == 0:
+        filename = "UE_results.csv"
+    else:
+        filename = "UE_results_it_{}.csv".format(iteration)
+    outFile = open(filename, "w")                                                                                                                                                                                                                                                                # IVT, WT, WK, TR
     tmpOut = sep.join(["B","A","Capacite","Distance","Cout","Volume"])
     outFile.write(tmpOut+"\n")
     
@@ -428,10 +439,10 @@ if __name__ == '__main__':
     print("Reading the network data took", round(time.time() - readStart, 2), "secs")
     
     print("start assignement: ")
-    assignment("FW", accuracy = 0.01, maxIter=4)
+    assignment("FW", accuracy = 0.001, maxIter=4)
 
 #%%
-    writeUEresults()
+    # writeUEresults()
     #assignment("stochastic", "MSA", accuracy = 0.01, maxIter=100)"" 
     # writePathResults()
 
