@@ -66,8 +66,8 @@ def readDemand():
     for x in inFile:
         tmpIn = [t.strip() for t in x.strip().split(",")]
         A, B = int(float(tmpIn[0])), int(float(tmpIn[1]))
-        if A > 300:
-           break
+        # if A > 300:
+        #    break
         tripSet[A, B] = initDemand(tmpIn)
         if A not in zoneSet:
             zoneSet[A] = Zone([A])
@@ -284,7 +284,7 @@ def loadAON():
         x_bar: a dictionary of flows of all links
     '''
     x_bar = [0.0] * len(g.es)
-    SPTT = 0.0
+    # SPTT = 0.0
     for r in originZones:
         timeDijkstra= time.time()
         paths = g.get_shortest_paths(str(r), [str(dest) for dest in zoneSet[r].destList], "cost_total", "out", "epath")
@@ -294,17 +294,18 @@ def loadAON():
                 dem = tripSet[r, s]['demand']
             except KeyError:
                 dem = 0.0
-            try:
-                SPTT = SPTT + int(sum(g.es[paths[index]]['cost_total']) * dem)
-            except KeyError:
-                pass
+            # try:
+            #     SPTT = SPTT + int(sum(g.es[paths[index]]['cost_total']) * dem)
+            # except KeyError:
+            #     pass
             if r != s:
-                tripSet[(r, s)]['sptt'] = str(SPTT)
+                # tripSet[(r, s)]['sptt'] = str(SPTT)
                 for edge in paths[index]:
                     x_bar[edge] = x_bar[edge] + dem
         if int(r)%100 == 0:
             print("Origin: {}, Dijkstra time used: {} sedonds ".format(r, round(time.time() - timeDijkstra, 2)))
-    return SPTT, x_bar
+    #return SPTT, x_bar
+    return x_bar
 
 # def loadAON():
 #     """
@@ -342,7 +343,9 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
     gap = float("inf")
     startP = time.time()
     print("Initialisation starts")
-    _, g.es['flow'] = loadAON() # 0. Initialisation with AON load
+    # _, g.es['flow'] = loadAON() # 0. Initialisation with AON load
+    g.es['flow'] = loadAON() # 0. Initialisation with AON load
+
     total_cost1 = round(sum([a['flow'] * a['cost_total'] for a in g.es]), 3)
     while gap > accuracy:
         startI  = time.time()
@@ -353,8 +356,8 @@ def assignment(algorithm, accuracy = 0.01, maxIter=100):
         print("Update travel time used: ", round(time.time() - timeCost, 2), "secs")
 
         # All or nothing load
-        _, y_bar = loadAON() # 2. Direction finding
-        
+        # _, y_bar = loadAON() # 2. Direction finding
+        y_bar = loadAON() # 2. Direction finding
         # 3. Calculate the alpha
         if algorithm == "MSA" or it < 2:
             alpha = (1.0/it)
